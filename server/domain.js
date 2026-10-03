@@ -41,14 +41,25 @@ export function sell(state, input) {
           z.object({
             variantId: z.string(),
             quantity: z.number().int().positive().max(10000),
+            expectedPrice: z.number().int().positive().optional(),
           }),
         )
         .min(1)
         .max(200),
       customer: z.string().max(100),
       payment: z.enum(["Efectivo", "Transferencia", "Tarjeta"]),
+      discount: z.number().int().min(0).max(100).default(0),
+      requestId: z.string().uuid().optional(),
     })
     .parse(input);
+  if (sale.requestId) {
+    const prior = state.sales.find((s) => s.requestId === sale.requestId);
+    if (prior) {
+      if (prior.requestPayload !== JSON.stringify(sale))
+        throw Error("Este intento de venta ya fue usado con otros datos.");
+      return prior;
+    }
+  }
   if (!state.cash.open)
     throw Error("Abrí la caja antes de registrar una venta.");
   const quantities = new Map();
@@ -60,8 +71,19 @@ export function sell(state, input) {
   const items = [...quantities].map(([id, quantity]) => {
     const p = state.products.find((p) => p.variants.some((v) => v.id === id));
     const v = p?.variants.find((v) => v.id === id);
-    if (!v || v.stock < quantity)
+    if (!v || p.archived || v.stock < quantity)
       throw Error("Stock insuficiente para una de las variantes.");
+    if (
+      sale.items.some(
+        (i) =>
+          i.variantId === id &&
+          i.expectedPrice !== undefined &&
+          i.expectedPrice !== p.price,
+      )
+    )
+      throw Error(
+        "El precio cambió. Actualizá la tienda y volvé a armar la venta.",
+      );
     return {
       variantId: id,
       name: p.name,
@@ -83,8 +105,15 @@ export function sell(state, input) {
     date: new Date().toISOString(),
     customer: sale.customer || "Consumidor final",
     payment: sale.payment,
+    requestId: sale.requestId,
+    requestPayload: sale.requestId ? JSON.stringify(sale) : undefined,
+    discount: sale.discount,
     items,
-    total: items.reduce((n, i) => n + i.price * i.quantity, 0),
+    subtotal: items.reduce((n, i) => n + i.price * i.quantity, 0),
+    total: Math.round(
+      items.reduce((n, i) => n + i.price * i.quantity, 0) *
+        (1 - sale.discount / 100),
+    ),
   };
   state.sales.unshift(result);
   if (result.payment === "Efectivo") state.cash.balance += result.total;
@@ -165,6 +194,131 @@ export function seed(name, empty = false) {
 
 export function applyAction(s, action, body) {
   switch (action) {
+    case "product-edit": {
+      const input = z
+        .object({
+          id: z.string(),
+          name: productSchema.shape.name,
+          brand: productSchema.shape.brand,
+          category: productSchema.shape.category,
+          price: productSchema.shape.price,
+          cost: productSchema.shape.cost,
+          min: productSchema.shape.min,
+        })
+        .parse(body);
+      const p = s.products.find((p) => p.id === input.id);
+      if (!p) throw Error("Producto no encontrado.");
+      Object.assign(p, input);
+      break;
+    }
+    case "product-archive": {
+      const input = z
+        .object({ id: z.string(), archived: z.boolean() })
+        .parse(body);
+      const p = s.products.find((p) => p.id === input.id);
+      if (!p) throw Error("Producto no encontrado.");
+      p.archived = input.archived;
+      break;
+    }
+    case "receive": {
+      const input = z
+        .object({
+          productId: z.string(),
+          reason: z.string().trim().min(3).max(150),
+          items: z
+            .array(
+              z.object({
+                variantId: z.string(),
+                quantity: z.number().int().min(0).max(10000),
+              }),
+            )
+            .min(1)
+            .max(600),
+        })
+        .parse(body);
+      const p = s.products.find((p) => p.id === input.productId);
+      if (!p || p.archived) throw Error("Producto no disponible.");
+      if (
+        new Set(input.items.map((i) => i.variantId)).size !==
+          input.items.length ||
+        input.items.some((i) => !p.variants.some((v) => v.id === i.variantId))
+      )
+        throw Error("Variantes inválidas.");
+      if (!input.items.some((i) => i.quantity > 0))
+        throw Error("Ingresá al menos una unidad.");
+      for (const i of input.items.filter((i) => i.quantity > 0)) {
+        const v = p.variants.find((v) => v.id === i.variantId);
+        v.stock += i.quantity;
+        s.movements.unshift({
+          id: crypto.randomUUID(),
+          date: new Date().toISOString(),
+          description: `Ingreso: ${p.name} · ${v.color} / ${v.size} · +${i.quantity} · ${input.reason}`,
+          variantId: v.id,
+          quantity: i.quantity,
+          amount: 0,
+          method: "Inventario",
+        });
+      }
+      break;
+    }
+    case "return": {
+      const input = z
+        .object({ id: z.string(), reason: z.string().trim().min(3).max(150) })
+        .parse(body);
+      const sale = s.sales.find((s) => s.id === input.id);
+      if (!sale || sale.returnedAt)
+        throw Error("Esta venta no existe o ya fue devuelta.");
+      if (!s.cash.open)
+        throw Error("Abrí la caja para registrar la devolución.");
+      if (sale.payment === "Efectivo" && s.cash.balance < sale.total)
+        throw Error("No hay efectivo suficiente para devolver esta venta.");
+      for (const i of sale.items) {
+        const v = s.products
+          .flatMap((p) => p.variants)
+          .find((v) => v.id === i.variantId);
+        if (!v) throw Error("Una variante ya no existe.");
+      }
+      for (const i of sale.items)
+        s.products
+          .flatMap((p) => p.variants)
+          .find((v) => v.id === i.variantId).stock += i.quantity;
+      sale.returnedAt = new Date().toISOString();
+      sale.returnReason = input.reason;
+      if (sale.payment === "Efectivo") s.cash.balance -= sale.total;
+      s.movements.unshift({
+        id: crypto.randomUUID(),
+        date: sale.returnedAt,
+        description: `Devolución total #${sale.number} · ${input.reason}`,
+        amount: -sale.total,
+        method: sale.payment,
+      });
+      break;
+    }
+    case "cash-movement": {
+      const input = z
+        .object({
+          amount: z
+            .number()
+            .int()
+            .min(-100000000)
+            .max(100000000)
+            .refine((n) => n !== 0),
+          reason: z.string().trim().min(3).max(150),
+        })
+        .parse(body);
+      if (!s.cash.open) throw Error("La caja está cerrada.");
+      if (s.cash.balance + input.amount < 0)
+        throw Error("El retiro supera el efectivo disponible.");
+      s.cash.balance += input.amount;
+      s.movements.unshift({
+        id: crypto.randomUUID(),
+        date: new Date().toISOString(),
+        description: input.reason,
+        amount: input.amount,
+        method: "Efectivo",
+      });
+      break;
+    }
     case "products":
       addProduct(s, body);
       break;
@@ -176,12 +330,17 @@ export function applyAction(s, action, body) {
         .object({
           variantId: z.string(),
           delta: z.number().int().min(-100000).max(100000),
+          expected: z.number().int().nonnegative().optional(),
           reason: z.string().trim().min(3).max(150),
         })
         .parse(body);
       const v = s.products
         .flatMap((p) => p.variants)
         .find((v) => v.id === p.variantId);
+      if (v && p.expected !== undefined && v.stock !== p.expected)
+        throw Error(
+          "El stock cambió desde que abriste esta ventana. Actualizá la tienda antes de ajustar.",
+        );
       if (!v || v.stock + p.delta < 0)
         throw Error(
           "El ajuste dejaría stock negativo o la variante no existe.",
@@ -212,11 +371,23 @@ export function applyAction(s, action, body) {
         .object({
           open: z.boolean(),
           balance: z.number().int().nonnegative().max(1000000000),
+          counted: z.number().int().nonnegative().max(1000000000).optional(),
         })
         .parse(body);
       if (p.open === s.cash.open)
         throw Error("El estado de caja ya fue modificado.");
-      s.cash = { open: p.open, balance: p.open ? p.balance : s.cash.balance };
+      s.cash = {
+        ...s.cash,
+        open: p.open,
+        balance: p.open ? p.balance : s.cash.balance,
+      };
+      if (!p.open && p.counted !== undefined)
+        s.cash.lastClose = {
+          expected: s.cash.balance,
+          counted: p.counted,
+          difference: p.counted - s.cash.balance,
+          date: new Date().toISOString(),
+        };
       s.movements.unshift({
         id: crypto.randomUUID(),
         date: new Date().toISOString(),

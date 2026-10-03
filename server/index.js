@@ -5,7 +5,17 @@ import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { applyAction, seed } from "./domain.js";
+import { installPlatform, tenantAccess } from "./platform.js";
 const production = process.argv.includes("--production");
+const hosted = process.env.NODE_ENV === "production";
+const origin = process.env.APP_ORIGIN || "http://localhost:5173";
+if (
+  hosted &&
+  (!origin.startsWith("https://") ||
+    !process.env.PASO_DATA_DIR ||
+    !process.env.PASO_CONTROL_SECRET)
+)
+  throw Error("Configuración de producción incompleta.");
 const dataDir = process.env.PASO_DATA_DIR || "data";
 mkdirSync(dataDir, { recursive: true });
 const db = new DatabaseSync(resolve(dataDir, "paso.sqlite"));
@@ -14,14 +24,38 @@ db.exec(
 );
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json({ limit: "100kb" }));
+app.use(
+  express.json({
+    limit: "100kb",
+    verify: (req, res, buffer) => {
+      req.rawBody = buffer.toString("utf8");
+    },
+  }),
+);
+app.use((req, res, next) => {
+  res.set("X-Content-Type-Options", "nosniff");
+  res.set("Referrer-Policy", "same-origin");
+  res.set("X-Frame-Options", "DENY");
+  if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
+  next();
+});
+app.get("/api/health", (req, res) => {
+  try {
+    db.prepare("SELECT 1").get();
+    res.json({ ok: true, service: "paso" });
+  } catch {
+    res.status(503).json({ ok: false });
+  }
+});
 app.use((req, res, next) => {
   if (
     !["GET", "HEAD"].includes(req.method) &&
     req.headers.origin &&
-    !["http://localhost:5173", "http://127.0.0.1:5173"].includes(
-      req.headers.origin,
-    )
+    !(
+      hosted
+        ? [origin]
+        : [origin, "http://localhost:5173", "http://127.0.0.1:5173"]
+    ).includes(req.headers.origin)
   )
     return res.status(403).json({ error: "Origen no permitido" });
   next();
@@ -37,7 +71,7 @@ function session(res, user) {
     httpOnly: true,
     sameSite: "strict",
     maxAge: 86400000,
-    secure: false,
+    secure: hosted,
   });
 }
 app.post("/api/demo", (req, res) => {
@@ -66,8 +100,24 @@ app.post("/api/demo", (req, res) => {
 });
 const attempts = new Map();
 app.post("/api/login", (req, res) => {
+  const input = z
+    .object({
+      email: z
+        .string()
+        .trim()
+        .email()
+        .max(254)
+        .transform((s) => s.toLowerCase()),
+      password: z.string().min(1).max(200),
+    })
+    .parse(req.body);
   const now = Date.now(),
-    key = req.ip;
+    key = input.email;
+  for (const [k, v] of attempts) if (now - v.time > 600000) attempts.delete(k);
+  if (attempts.size > 10000)
+    return res
+      .status(429)
+      .json({ error: "Demasiados intentos. Esperá unos minutos." });
   let attempt = attempts.get(key);
   if (!attempt || now - attempt.time > 600000) {
     attempt = { time: now, count: 0 };
@@ -77,9 +127,6 @@ app.post("/api/login", (req, res) => {
     return res
       .status(429)
       .json({ error: "Demasiados intentos. Esperá 10 minutos." });
-  const input = z
-    .object({ email: z.string().email(), password: z.string().min(1).max(200) })
-    .parse(req.body);
   const u = db.prepare("SELECT * FROM users WHERE email=?").get(input.email);
   if (
     !u ||
@@ -90,9 +137,11 @@ app.post("/api/login", (req, res) => {
   )
     return res.status(401).json({ error: "Credenciales incorrectas" });
   session(res, u.id);
+  attempts.delete(key);
   res.json({ ok: true });
 });
 app.get("/api/config", (req, res) => res.json({ demo: !production }));
+installPlatform(app, db);
 app.use("/api", (req, res, next) => {
   const token = req.headers.cookie
     ?.split(";")
@@ -128,6 +177,11 @@ app.get("/api/tenants", (req, res) =>
   ),
 );
 app.post("/api/tenants", (req, res) => {
+  if (production)
+    return res.status(403).json({
+      error:
+        "Los negocios se administran desde el superadmin de MercadoSimple.",
+    });
   const { name } = z
     .object({ name: z.string().trim().min(2).max(80) })
     .parse(req.body);
@@ -154,6 +208,11 @@ app.use("/api/t/:tenant", (req, res, next) => {
   )
     return res.status(403).json({ error: "No tenés acceso a este negocio" });
   req.tenant = req.params.tenant;
+  if (!tenantAccess(db, req.tenant))
+    return res.status(403).json({
+      error:
+        "El acceso de este negocio está suspendido o vencido. Contactá al administrador de MercadoSimple.",
+    });
   next();
 });
 app.get("/api/t/:tenant/state", (req, res) =>
@@ -204,6 +263,8 @@ if (production) {
   });
   app.use(vite.middlewares);
 }
-app.listen(Number(process.env.PORT || 5173), "127.0.0.1", () =>
-  console.log("Paso disponible en http://localhost:5173"),
+app.listen(
+  Number(process.env.PORT || 5173),
+  process.env.HOST || (hosted ? "0.0.0.0" : "127.0.0.1"),
+  () => console.log("Paso disponible en http://localhost:5173"),
 );

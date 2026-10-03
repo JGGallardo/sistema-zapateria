@@ -1,68 +1,65 @@
-# Paso · Sistema de ventas para zapatería e indumentaria
+# Paso · Zapatería e indumentaria
 
-Primera versión local funcional, inspirada en la organización del dashboard de Aumo. React 19, Vite 7, Express 5 y SQLite integrado en Node 24. Interfaz responsive en español, importes en pesos argentinos y almacenamiento en centavos.
+Sistema React para catálogo con talles y colores, stock y ventas. Interfaz en español, importes en pesos argentinos y montos guardados en centavos.
 
-## Demo publicada
+- Producción: https://paso-production-1dec.up.railway.app
+- Administración: https://mercado-simple-production.up.railway.app/superadmin → **Tiendas Paso**.
+- Demo independiente: https://jggallardo.github.io/sistema-zapateria/ (datos ficticios, solo en el navegador).
 
-**[Abrir Paso en GitHub Pages](https://jggallardo.github.io/sistema-zapateria/)** · [Repositorio](https://github.com/JGGallardo/sistema-zapateria)
+## Uso diario
 
-La demo pública funciona sin servidor: ingresá con **Entrar al espacio de demostración**. Cada navegador guarda su propio catálogo, caja y ventas en almacenamiento local. Solo usar datos ficticios: no existen cuentas reales, sincronización entre equipos ni aislamiento de seguridad multiusuario en esta demo. Borrar los datos del navegador elimina los datos de prueba. La versión local mantiene la API, SQLite y las validaciones de membresía del servidor.
+1. Abrí la caja con el efectivo inicial.
+2. Creá un producto con marca, categoría, precio, costo, talles y colores.
+3. En **Productos → Stock**, recibí mercadería por grilla de talle/color. Tocá una cantidad para registrar un conteo o ajuste con motivo.
+4. En **Vender**, elegí las variantes, el cliente, descuento y medio de pago. El sistema verifica disponibilidad y descuenta stock al confirmar.
+5. Desde **Ventas**, consultá el comprobante interno o registrá una devolución completa. Para cambios, devolvé y registrá una nueva venta.
+6. En **Caja**, registrá ingresos/retiros y cerrá indicando el efectivo contado. Se conserva la diferencia.
 
-GitHub Actions ejecuta las pruebas y publica la demo al actualizar `main`. Para previsualizarla localmente: `npm run build:pages` y `npm run preview:pages`; abrir la ruta `/sistema-zapateria/`. `npm run build` conserva la compilación normal para el servidor local.
+Incluye filtros de productos agotados, reposición y archivados; edición de precios, archivo/restauración, exportación CSV, clientes y movimientos. Los precios históricos de ventas se conservan. El panel muestra ventas completadas sin devoluciones y stock vigente. El tema Claro suave u Oscuro se recuerda por navegador.
 
-## Inicio
+## Ejecución local
 
-Requisito: Node.js 24 o superior y npm o pnpm. Abrir `SistemaZapateria.code-workspace` en VS Code.
+Node.js 24, pnpm y VS Code. Abrir `SistemaZapateria.code-workspace`.
 
 ```sh
-npm install
-npm run dev
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-Abrir http://localhost:5173 y seleccionar **Entrar al espacio de demostración**. No requiere credenciales. Este acceso existe solo en modo desarrollo. Incluye dos negocios independientes; uno tiene productos ficticios y el otro comienza vacío. No se copiaron datos privados de Aumo.
+En http://localhost:5173 usar **Explorar tienda de ejemplo**. En Windows también se puede ejecutar `Iniciar.ps1`. La cuenta demo está deshabilitada en producción. Los datos locales están en `data/paso.sqlite`, excluidos del repositorio.
 
-En este equipo también se puede ejecutar `powershell -File .\Iniciar.ps1` o la tarea **Iniciar Paso** de VS Code (Ctrl+Shift+B). El iniciador utiliza Node 24 incluido en Codex si el Node del sistema es anterior. Si la dirección ya está abierta y funcionando, no iniciar una segunda instancia.
+## Railway y administración central
 
-1. Abrir Caja e ingresar el efectivo inicial.
-2. Crear productos con talles y colores separados por comas, o usar los ejemplos.
-3. En Nueva venta seleccionar producto y variante, elegir cliente y medio de pago, y confirmar.
-4. Revisar la venta, el descuento de stock y los indicadores.
-5. Cambiar el negocio desde el selector lateral para comprobar su separación.
+Proyecto independiente **paso-retail**, servicio **paso**, un volumen persistente en `/data` y una única réplica. Docker usa Node 24, instala el lockfile, ejecuta compilación y pruebas. Al actualizar `main`, Railway publica la aplicación y GitHub Actions actualiza la demo de Pages.
 
-## Funcionalidades
+Variables de producción: `NODE_ENV=production`, `HOST=0.0.0.0`, `PORT=8080`, `PASO_DATA_DIR=/data`, `APP_ORIGIN` con el origen HTTPS y `PASO_CONTROL_SECRET` aleatorio de al menos 32 caracteres. Nunca incluir la clave en Git ni en variables de Vite.
 
-- Resumen calculado con ventas, ticket promedio, stock, alertas y evolución de los últimos siete días.
-- Alta de productos con marca, categoría, precio, costo, talles, colores y stock mínimo. Variantes con SKU único.
-- Búsqueda y filtros de catálogo e inventario; ajustes de stock con motivo y exportación CSV.
-- Ventas con control de stock, precios y costos históricos; comprobante interno no fiscal.
-- Caja con apertura, cierre y saldo esperado; efectivo separado de tarjetas y transferencias.
-- Alta de clientes, reportes básicos y creación de negocios.
-- Membresías verificadas por el servidor en cada acceso a un negocio. Las ventas y los cambios se guardan en transacciones SQLite.
-- Sesiones de 24 horas con cookie HttpOnly y SameSite; contraseñas con scrypt; comprobación de origen y límite de intentos de acceso.
+MercadoSimple usa `PASO_APP_ORIGIN` y la misma `PASO_CONTROL_SECRET` exclusivamente en su servidor. **Tiendas Paso** permite crear el negocio y su titular, vincular un titular existente, editar el nombre, renovar la vigencia, suspender o cancelar. Los estados bloqueados o vencidos impiden todas las operaciones de la tienda inmediatamente, sin borrar sus datos. No se crean usuarios desde la demo pública ni desde una cuenta comercial.
+
+La integración valida la sesión de superadmin y firma método, ruta, fecha, nonce, actor y cuerpo con HMAC-SHA256. Paso rechaza firmas alteradas, expiradas y repetidas; registra las altas y cambios con el actor de plataforma en `control_audit`. La base de MercadoSimple no se comparte con Paso. No se importan negocios ni información comercial existente automáticamente.
+
+El titular inicia sesión en Paso con email y contraseña; una cuenta puede tener varias tiendas. Sesiones HttpOnly/Secure/SameSite en producción, contraseñas scrypt, validaciones de membresía, controles de origen y transacciones SQLite. Salud: `/api/health`.
 
 ## Verificación
 
 ```sh
-npm test
-npm run build
+pnpm test
+pnpm build
+pnpm build:pages
 ```
 
-Base persistente en `data/paso.sqlite`, excluida de Git. Para respaldar, detener el servidor y copiar la carpeta `data` completa. No borrar esa carpeta si se desean conservar los datos.
+Las pruebas cubren aislamiento, rollback, stock negativo, precio histórico, descuentos, reintentos de ventas, devoluciones, arqueo y ciclo de vida del tenant con firmas y protección contra replay. En el repositorio privado de MercadoSimple hay pruebas adicionales del puente de administración.
 
-## Alcance de esta versión
+## Respaldo y alcance
 
-Es una base local de desarrollo, no un SaaS desplegado. El servidor escucha únicamente en 127.0.0.1. El acceso demo comparte una cuenta local y no debe exponerse a Internet. El modo `npm start` sirve la compilación y deshabilita el acceso demo; el alta y aprovisionamiento de usuarios reales aún no están implementados.
+El volumen conserva datos al desplegar, pero no reemplaza una copia de seguridad. Para un respaldo manual consistente, detener el servicio y copiar la carpeta `/data` completa (incluidos archivos WAL/SHM si existen), o usar la API de backup de SQLite. Probar la restauración antes de usar la copia. No están configurados respaldos automáticos.
 
-Antes de publicar: incorporar registro/invitaciones, recuperación de cuenta, roles, HTTPS y cookies Secure, configuración de orígenes, control de sesiones persistentes, migraciones, respaldos automatizados y una base de datos adecuada al despliegue. SQLite y el almacenamiento JSON por negocio simplifican esta primera versión y deberán evolucionar para grandes volúmenes o múltiples instancias.
+Esta versión usa SQLite y un documento por tienda: una sola instancia, apropiada para comenzar; para gran volumen o escalado horizontal se requiere evolucionar el almacenamiento. Todos los titulares tienen permisos de administración dentro de sus tiendas. No incluye roles de empleados, recuperación automática de contraseña, contabilidad de compras/proveedores, múltiples depósitos ni facturación fiscal. Los pagos se registran, no se procesan. Las devoluciones son completas y requieren caja abierta.
 
-Pendientes de negocio: edición/baja de productos, devoluciones, descuentos, proveedores, compras, sucursales, arqueo detallado, facturación fiscal y permisos de empleados. Los botones presentes corresponden a las funciones implementadas. No hay facturación fiscal ni procesamiento real de pagos.
+## Referencias del rediseño
 
-## Estructura
-
-- `src/main.jsx`: interfaz React y flujos de operación.
-- `src/style.css`: sistema visual responsive.
-- `server/index.js`: API, sesiones, membresías y persistencia.
-- `server/domain.js`: catálogo, variantes, validación y venta.
-- `tests/domain.test.js`: invariantes de stock, precios y separación de datos.
-
-Referencias técnicas: [React](https://react.dev/learn), [Vite](https://vite.dev/guide/). Referencia de navegación: [Aumo](https://app.aumo.com.ar/dashboard).
+- [Lightspeed para zapaterías](https://www.lightspeedhq.com/pos/retail/shoe-store-pos/): variantes, inventario y reposición.
+- [Matrices de inventario Lightspeed](https://retail-support.lightspeedhq.com/hc/en-us/articles/229130188-Creating-matrixes): grilla de talles y colores.
+- [Inventario Loyverse](https://loyverse.com/en-us/advanced-inventory): recepciones y ajustes con historial.
+- [Paleta indicada](https://coolors.co/palette/0a0908-49111c-f2f4f3-a9927d-5e503f): negro, bordó, blanco apagado, taupe y marrón; fondo claro cálido `#e9e6e0`.
+- [Aumo](https://app.aumo.com.ar/dashboard): referencia inicial de organización. No se copiaron datos privados.

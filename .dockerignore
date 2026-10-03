@@ -1,0 +1,10 @@
+node_modules
+.git
+.publish
+.env
+.env.*
+data
+dist
+.pnpm-store
+docs/*.png
+*.log
