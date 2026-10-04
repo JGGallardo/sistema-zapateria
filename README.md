@@ -30,6 +30,10 @@ En http://localhost:5173 usar **Explorar tienda de ejemplo**. En Windows tambié
 
 ## Railway y administración central
 
+Paso y MercadoSimple son productos independientes. Tienen repositorios, despliegues, bases de datos, usuarios comerciales, contraseñas y sesiones separados. No comparten catálogo, stock, clientes, ventas, caja ni lógica comercial. Una cuenta o tienda de un sistema no habilita acceso al otro, aunque utilice el mismo email.
+
+El único punto compartido es el superadmin, actualmente alojado en la aplicación de MercadoSimple. Su sección Tiendas Paso consume exclusivamente la API administrativa de Paso para altas y vigencia de acceso. Paso autentica a sus usuarios y ejecuta las operaciones comerciales con su propia base y servicio; no consulta la base ni las API comerciales de MercadoSimple para operar. Mantener esta separación al agregar funcionalidades.
+
 Proyecto independiente **paso-retail**, servicio **paso**, un volumen persistente en `/data` y una única réplica. Docker usa Node 24, instala el lockfile, ejecuta compilación y pruebas. Al actualizar `main`, Railway publica la aplicación y GitHub Actions actualiza la demo de Pages.
 
 Variables de producción: `NODE_ENV=production`, `HOST=0.0.0.0`, `PORT=8080`, `PASO_DATA_DIR=/data`, `APP_ORIGIN` con el origen HTTPS y `PASO_CONTROL_SECRET` aleatorio de al menos 32 caracteres. Nunca incluir la clave en Git ni en variables de Vite.

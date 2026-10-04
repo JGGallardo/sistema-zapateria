@@ -180,7 +180,7 @@ app.post("/api/tenants", (req, res) => {
   if (production)
     return res.status(403).json({
       error:
-        "Los negocios se administran desde el superadmin de MercadoSimple.",
+        "Las altas de negocios se administran desde el panel de superadmin.",
     });
   const { name } = z
     .object({ name: z.string().trim().min(2).max(80) })
@@ -211,7 +211,7 @@ app.use("/api/t/:tenant", (req, res, next) => {
   if (!tenantAccess(db, req.tenant))
     return res.status(403).json({
       error:
-        "El acceso de este negocio está suspendido o vencido. Contactá al administrador de MercadoSimple.",
+        "El acceso de este negocio está suspendido o vencido. Contactá al administrador de la plataforma.",
     });
   next();
 });

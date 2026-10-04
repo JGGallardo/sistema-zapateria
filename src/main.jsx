@@ -417,8 +417,8 @@ function App() {
                   Ingresar <ArrowRight size={17} />
                 </button>
                 <p className="hint">
-                  Tu cuenta y tus tiendas se habilitan desde el superadmin de
-                  MercadoSimple.
+                  Tu cuenta y tus tiendas se habilitan desde el panel de
+                  administración de la plataforma.
                 </p>
               </>
             )}
@@ -1484,8 +1484,7 @@ function App() {
                       <b>{data.name}</b>
                     </p>
                     <p>
-                      Los negocios, sus titulares y la vigencia del acceso se
-                      administran desde MercadoSimple.
+                      Administrá acá el día a día de tu tienda en Paso.
                     </p>
                     {demo && (
                       <button
@@ -1496,8 +1495,8 @@ function App() {
                       </button>
                     )}
                     <p className="hint">
-                      Cada tienda tiene su propio catálogo, stock, clientes,
-                      ventas y caja.
+                      Las altas de tiendas y la vigencia del acceso se gestionan
+                      desde el panel de superadmin.
                     </p>
                   </section>
                   <section className="card padded">
