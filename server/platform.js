@@ -1,3 +1,4 @@
+import {installPlatformCommerce} from './platform-commerce.js';
 import {
   createHmac,
   timingSafeEqual,
@@ -75,6 +76,7 @@ export function installPlatform(app, db) {
     req.controlActor = actor;
     next();
   });
+  installPlatformCommerce(app,db);
   app.get("/api/control/tenants", (req, res) => {
     res.json({
       tenants: db
@@ -200,3 +202,4 @@ export function tenantAccess(db, id) {
       Date.parse(m.expires_at) > Date.now())
   );
 }
+
